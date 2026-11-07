@@ -1,0 +1,62 @@
+name: Windows build and tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Build application and run engine tests
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Check WPF application
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $destination = Join-Path $env:RUNNER_TEMP 'speedklava-smoke'
+          $process = Start-Process -FilePath '.\bin\SpeedKlava.exe' -ArgumentList @('--smoke-test', ('"' + $destination + '"')) -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            Stop-Process -Id $process.Id -Force
+            throw 'Application smoke test timed out'
+          }
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path "$destination\smoke-error.txt") { Get-Content "$destination\smoke-error.txt" }
+            throw "Application exited with code $($process.ExitCode)"
+          }
+          if (-not (Test-Path "$destination\smoke-result.txt")) { throw 'Smoke result is missing' }
+          Get-Content "$destination\smoke-result.txt"
+
+      - name: Prepare portable application
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item bin\SpeedKlava.exe,bin\SpeedKlava.exe.config,README.md,RESEARCH.md -Destination release
+
+      - name: Upload Windows application
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpeedKlava-Windows
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-smoke-diagnostics
+          path: ${{ runner.temp }}/speedklava-smoke/
+          if-no-files-found: ignore
+          retention-days: 7
