@@ -2,6 +2,8 @@
 
 Нативный тренажёр слепой печати для Windows. Русский интерфейс, русская ЙЦУКЕН и английская QWERTY. Работает без интернета, регистрации и дополнительных пакетов.
 
+**[Скачать готовую программу для Windows](https://github.com/cheden123/SpeedKlava/releases/latest/download/SpeedKlava-Windows.zip)** · [Все версии и изменения](https://github.com/cheden123/SpeedKlava/releases)
+
 ## Для тех, кто уже печатает вслепую · версия 1.1
 
 Откройте **«Для опытных»** в левом меню. Полная раскладка доступна с первого запуска; проходить начальный курс или менять его этап не требуется. Подсказки пальцев в этом разделе скрыты.
@@ -77,5 +79,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 Код проекта: [cheden123/SpeedKlava](https://github.com/cheden123/SpeedKlava).
 
 В [GitHub Actions](https://github.com/cheden123/SpeedKlava/actions/workflows/windows.yml) после изменений запускаются сборка Windows-приложения, проверки движка и автоматическая проверка окна. В успешном запуске скачайте артефакт `SpeedKlava-Windows`: он содержит exe, конфигурацию и документацию. Для скачивания артефактов может потребоваться вход в GitHub.
+
+Готовые стабильные версии публикуются в **[Releases](https://github.com/cheden123/SpeedKlava/releases)**: архив `SpeedKlava-Windows.zip`, описание изменений и `SHA256SUMS.txt`. Они доступны без входа в GitHub и не имеют срока хранения артефактов Actions.
+
+Для нового выпуска обновите `VERSION`, версию сборки в `src/App.cs` и добавьте `release-notes/vX.Y.Z.md`. После отправки изменения `VERSION` в `main` workflow `Publish Windows release` соберёт и проверит приложение, затем создаст тег и релиз. Также поддерживаются push тега `vX.Y.Z` и ручной запуск workflow; тег должен соответствовать `VERSION`. Уже опубликованные версии не перезаписываются. Для ручной команды тега: `git tag vX.Y.Z`, затем `git push origin vX.Y.Z`.
 
 Проверки запуска окна в CI не заменяют тестирование на реальной клавиатуре и разных компьютерах. Для исходников используйте Code → Download ZIP или обычный git clone.

@@ -1,0 +1,98 @@
+name: Publish Windows release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - VERSION
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: speedklava-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+
+      - name: Validate version and release notes
+        id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION must be a stable semantic version, for example 1.1.0' }
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) { throw 'Git tag and VERSION do not match' }
+          if (-not (Test-Path "release-notes/$tag.md")) { throw 'Release notes are missing' }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build and test
+        shell: pwsh
+        run: |
+          .\build.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Build or engine tests failed' }
+
+      - name: Check application startup and training screens
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $destination = Join-Path $env:RUNNER_TEMP 'release-smoke'
+          $process = Start-Process -FilePath '.\bin\SpeedKlava.exe' -ArgumentList @('--smoke-test', ('"' + $destination + '"')) -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            Stop-Process -Id $process.Id -Force
+            throw 'Application smoke test timed out'
+          }
+          if ($process.ExitCode -ne 0 -or -not (Test-Path "$destination/smoke-result.txt")) {
+            if (Test-Path "$destination/smoke-error.txt") { Get-Content "$destination/smoke-error.txt" }
+            throw 'Application smoke test failed'
+          }
+          Get-Content "$destination/smoke-result.txt"
+
+      - name: Package portable application
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binaryVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path bin/SpeedKlava.exe)).FileVersion
+          if ($binaryVersion -ne "$env:RELEASE_VERSION.0") { throw "Executable version $binaryVersion does not match VERSION" }
+          New-Item -ItemType Directory -Path package,dist -Force | Out-Null
+          Copy-Item bin/SpeedKlava.exe,bin/SpeedKlava.exe.config,README.md,RESEARCH.md -Destination package
+          Compress-Archive -Path package/* -DestinationPath dist/SpeedKlava-Windows.zip
+          $digest = (Get-FileHash dist/SpeedKlava-Windows.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  SpeedKlava-Windows.zip" | Set-Content dist/SHA256SUMS.txt -Encoding ascii
+
+      - name: Publish release with Windows download
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $existing = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft,targetCommitish 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $existing | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              Write-Output 'This version is already published. Existing releases are not overwritten.'
+              exit 0
+            }
+            if ($release.targetCommitish -ne $env:GITHUB_SHA) { throw 'Existing draft targets another commit; review it before retrying' }
+          } else {
+            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "SpeedKlava $env:RELEASE_TAG" --notes-file "release-notes/$env:RELEASE_TAG.md" --draft
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release' }
+          }
+          gh release upload $env:RELEASE_TAG dist/SpeedKlava-Windows.zip dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload release assets' }
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish release' }
