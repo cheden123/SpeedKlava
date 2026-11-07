@@ -73,6 +73,59 @@ class EngineTests
             Assert(p.Streak == 2, "yesterday streak maintained until today ends");
             p.Sessions.Add(new Session { At = DateTime.Today, Completed = true });
             Assert(p.Streak == 3, "today extends streak");
+            foreach (string language in new[] { "RU", "EN" }) foreach (string mode in Expert.Modes)
+            {
+                if (mode == Expert.Code && language == "RU") continue;
+                var beginner = new Profile { Language = language };
+                string text = Expert.Generate(beginner, mode, new Random(17), 3000);
+                Assert(text.Length >= 3000 && text.All(c => !char.IsControl(c)), "expert material supports full timed runs " + language + mode);
+                Assert(beginner.Stage == 0, "expert generator does not unlock beginner course");
+                if (mode == Expert.Speed) Assert(text.Any(c => char.IsLetter(c) && !Curriculum.Allowed(beginner).Contains(c)), "expert ignores course key restriction");
+                if (mode == Expert.Rhythm) Assert(text.Split(' ').All(w => w.Length == 4), "rhythm uses uniform word length");
+                if (mode == Expert.Symbols) Assert(text.Any(char.IsDigit) && text.Any(char.IsUpper) && text.Any(c => "!?;:".Contains(c)), "symbol training has digits case punctuation");
+                if (mode == Expert.Code) Assert(text.Contains("{") && text.Contains(";") && text.Contains("\"") && text.Any(char.IsUpper), "code material includes syntax and case");
+            }
+            bool codeRejected = false; try { Expert.Generate(new Profile(), Expert.Code, new Random(1), 100); } catch (ArgumentException) { codeRejected = true; }
+            Assert(codeRejected, "code requires matching EN layout");
+            var personal = new Profile(); personal.Keys.Add(new KeyStat { Key = "щъ", Language = "RU", Attempts = 10, Errors = 5 });
+            Assert(Expert.Generate(personal, Expert.Weak, new Random(1), 500).Split(' ').All(w => w == "щъ"), "weak-pair mode focuses recorded problem even without matching word");
+            var even = new Run("aaaa", new Profile { Language = "EN" }, Expert.Rhythm);
+            foreach (double time in new[] { .1, .3, .5, .7 }) { even.ActiveSeconds = time; even.Input('a'); }
+            Assert(even.RhythmSamples == 3 && even.RhythmCv < .0001, "uniform intervals have zero CV");
+            var uneven = new Run("aaaaaa", new Profile { Language = "EN" }, Expert.Rhythm);
+            foreach (double time in new[] { .1, .2, .7, 1.7 }) { uneven.ActiveSeconds = time; uneven.Input('a'); }
+            Assert(uneven.RhythmCv > 50, "uneven intervals increase CV");
+            int samples = uneven.RhythmSamples;
+            uneven.ActiveSeconds = 1.9; uneven.Input('b'); uneven.ActiveSeconds = 2.1; uneven.Input('a');
+            Assert(uneven.RhythmSamples == samples, "error and correction break rhythm sequence");
+            uneven.BreakRhythm(); uneven.ActiveSeconds = 2.5; uneven.Input('a');
+            Assert(uneven.RhythmSamples == samples, "pause excludes cross-pause interval");
+            var compare = new Profile();
+            compare.Sessions.Add(new Session { Mode = Expert.Speed, RequestedSeconds = 60, Seconds = 60, Attempts = 9999, Correct = 9999, Completed = true });
+            foreach (int speed in new[] { 200, 250, 300, 350, 1000 }) compare.Sessions.Add(new Session { Mode = Expert.Speed, RequestedSeconds = 60, Seconds = 60, Attempts = speed, Correct = speed, Completed = true });
+            compare.Sessions.Add(new Session { Mode = Expert.Hard, RequestedSeconds = 60, Seconds = 60, Attempts = 999, Correct = 999, Completed = true });
+            compare.Sessions.Add(new Session { Mode = Expert.Speed, Language = "EN", RequestedSeconds = 60, Seconds = 60, Attempts = 999, Correct = 999, Completed = true });
+            compare.Sessions.Add(new Session { Mode = Expert.Speed, RequestedSeconds = 120, Seconds = 120, Attempts = 999, Correct = 999, Completed = true });
+            compare.Sessions.Add(new Session { Mode = Expert.Speed, RequestedSeconds = 60, Seconds = 60, Attempts = 999, Correct = 300, Completed = true });
+            compare.Sessions.Add(new Session { Mode = Expert.Speed, RequestedSeconds = 60, Seconds = 5, Attempts = 999, Correct = 999, Completed = true });
+            compare.Sessions.Add(new Session { Mode = Expert.Speed, RequestedSeconds = 60, Seconds = 60, Attempts = 999, Correct = 999, Completed = false });
+            Assert(Expert.Baseline(compare, Expert.Speed, "RU", 60) == 300, "baseline uses median of last five comparable accurate full runs only");
+            Assert(Expert.Baseline(compare, Expert.Rhythm, "RU", 60) == 0, "missing baseline is not fabricated");
+            var expertProfile = new Profile();
+            var expertRun = Type(expertProfile, new string('а', 100), Expert.Speed, false); expertRun.RequestedSeconds = 60; expertRun.TargetCpm = 400;
+            expertRun.Commit(expertProfile, true);
+            var secondRun = Type(expertProfile, new string('о', 100), Expert.Speed, false); secondRun.Commit(expertProfile, true);
+            Assert(expertProfile.Stage == 0 && expertProfile.Sessions[0].TargetCpm == 400 && expertProfile.Sessions[0].RhythmSamples == 99, "expert results store target and rhythm without advancing course");
+            temp = Path.Combine(Path.GetTempPath(), "SpeedKlava-expert-" + Guid.NewGuid() + ".xml");
+            try
+            {
+                expertProfile.ExpertGoal = 500; Store.Write(expertProfile, temp); var loaded = Store.Read(temp);
+                Assert(loaded.ExpertGoal == 500 && loaded.Sessions[0].RequestedSeconds == 60 && loaded.Sessions[0].TargetCpm == 400 && loaded.Sessions[0].RhythmSamples == 99, "new expert fields survive save/load");
+                File.WriteAllText(temp, "<Profile><Version>1</Version><RuStage>3</RuStage></Profile>");
+                loaded = Store.Read(temp);
+                Assert(loaded.RuStage == 3 && loaded.ExpertGoal == 300 && loaded.Sessions.Count == 0, "v1 progress loads with expert defaults");
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
             Console.WriteLine("PASS: " + assertions + " assertions"); return 0;
         }
         catch (Exception e) { Console.Error.WriteLine(e); return 1; }

@@ -31,6 +31,10 @@ namespace SpeedKlava
         public int Stage;
         public int Xp;
         public bool Completed;
+        public int RequestedSeconds;
+        public int TargetCpm;
+        public int RhythmSamples;
+        public double RhythmCv;
         public double Accuracy { get { return Attempts == 0 ? 0 : Correct * 100.0 / Attempts; } }
         public double Cpm { get { return Seconds <= 0 ? 0 : Correct * 60.0 / Seconds; } }
         public double Wpm { get { return Cpm / 5; } }
@@ -45,6 +49,7 @@ namespace SpeedKlava
         public bool Hints = true;
         public bool LiveStats = true;
         public bool LargeText;
+        public int ExpertGoal = 300;
         public List<KeyStat> Keys = new List<KeyStat>();
         public List<Session> Sessions = new List<Session>();
         public int Stage { get { return Language == "RU" ? RuStage : EnStage; } set { if (Language == "RU") RuStage = value; else EnStage = value; } }
@@ -95,6 +100,7 @@ namespace SpeedKlava
                 p.RuStage = Math.Max(0, Math.Min(Curriculum.Count - 1, p.RuStage));
                 p.EnStage = Math.Max(0, Math.Min(Curriculum.Count - 1, p.EnStage));
                 p.GoalMinutes = Math.Max(5, Math.Min(30, p.GoalMinutes));
+                p.ExpertGoal = Math.Max(100, Math.Min(800, p.ExpertGoal));
                 if (p.Keys.Any(k => k == null || k.Key == null || k.Attempts < 0 || k.Errors < 0 || k.Errors > k.Attempts) || p.Sessions.Any(s => s == null || s.Seconds < 0 || double.IsNaN(s.Seconds) || double.IsInfinity(s.Seconds) || s.Correct < 0 || s.Attempts < s.Correct || s.Xp < 0)) throw new InvalidDataException("Повреждённые данные прогресса.");
                 return p;
             }
@@ -200,6 +206,95 @@ namespace SpeedKlava
             return "Смотри на текст, держи кисти спокойно";
         }
     }
+    public static class Expert
+    {
+        public const string Speed = "Профи · Скорость";
+        public const string Rhythm = "Профи · Ритм";
+        public const string Hard = "Профи · Сложные слова";
+        public const string Weak = "Профи · Слабые пары";
+        public const string Symbols = "Профи · Знаки и числа";
+        public const string Code = "Профи · Код";
+        public static readonly string[] Modes = { Speed, Rhythm, Hard, Weak, Symbols, Code };
+        static readonly string[] RuHard = "достопримечательность синхронизация программирование предшествующий осуществление взаимодействие ответственность совершенствование последовательность междисциплинарный информационный чрезвычайный объявление объём съёмка подъезд ёмкость щепетильность жужжание ощущение юриспруденция эквивалентный квалификация инфраструктура распределённость беспрецедентный идентификация конфигурация исследовательский пользовательский".Split(' ');
+        static readonly string[] EnHard = "synchronization responsibility acknowledgement infrastructure accessibility queueing rhythm asynchronous miscellaneous questionnaire interoperability craftsmanship configuration throughput architecture unprecedented juxtaposition extraordinary maintenance dependency encapsulation authentication efficiency acquisition visualization".Split(' ');
+        static readonly string[] RuPairs = "ст но то на ен ов ни ра ко ро во пр по ос го ре ал ли ер от те ет ор ан та ьн цы щи жи ча чу юг съ ём".Split(' ');
+        static readonly string[] EnPairs = "th he in er an re on at en nd ti es or te of ed is it al ar st to nt ng se ha as ou io le ve co qu ck".Split(' ');
+        public static bool IsMode(string mode) { return Modes.Contains(mode); }
+        public static string Description(string mode)
+        {
+            if (mode == Rhythm) return "Ровный поток на словах одной длины. Смотри на разброс интервалов: меньше — ровнее. Не жертвуй точностью.";
+            if (mode == Hard) return "Длинные слова и неудобные переходы. Полная раскладка доступна сразу, независимо от этапа курса.";
+            if (mode == Weak) return "Частые слова с твоими трудными парами, затем короткое закрепление. Фокус учитывает ошибки и задержки.";
+            if (mode == Symbols) return "Числа, даты, заглавные буквы и пунктуация. Тренируй Shift другой рукой и точность переходов.";
+            if (mode == Code) return "Фрагменты JavaScript / C# / HTML / CSS в одну строку. Английская раскладка; пробелы и регистр значимы.";
+            return "Частотные слова всей раскладки. Подними удобный темп, сохраняя точность от 97%. Цель — личный ориентир.";
+        }
+        public static string Generate(Profile p, string mode, Random random, int length)
+        {
+            if (!IsMode(mode)) throw new ArgumentException("Unknown expert mode");
+            if (mode == Code && p.Language != "EN") throw new ArgumentException("Code training requires EN layout");
+            bool ru = p.Language == "RU";
+            string[] words = ru ? Curriculum.RuWords : Curriculum.EnWords;
+            string[] hard = ru ? RuHard : EnHard;
+            string alphabet = (ru ? Curriculum.Ru : Curriculum.En)[5];
+            string[] fallbackPairs = ru ? RuPairs : EnPairs;
+            var learned = p.Keys.Where(k => k.Language == p.Language && k.Key.Length == 2 && k.Key.All(c => alphabet.Contains(c)) && k.Attempts >= 3)
+                .OrderByDescending(k => (100 - k.Accuracy) * 4 + k.Latency / 20).Take(6).Select(k => k.Key).ToArray();
+            string[] pairs = learned.Length > 0 ? learned : fallbackPairs;
+            string[] rhythmWords = words.Where(w => w.Length == 4).ToArray();
+            var result = new System.Text.StringBuilder();
+            while (result.Length < length)
+            {
+                string part;
+                if (mode == Weak)
+                {
+                    string pair = pairs[random.Next(pairs.Length)];
+                    var matching = words.Concat(hard).Where(w => w.Contains(pair)).ToArray();
+                    part = matching.Length > 0 ? matching[random.Next(matching.Length)] + " " + pair : pair + " " + pair;
+                }
+                else if (mode == Hard) part = hard[random.Next(hard.Length)];
+                else if (mode == Rhythm) part = rhythmWords[random.Next(rhythmWords.Length)];
+                else if (mode == Symbols)
+                {
+                    string word = words[random.Next(words.Length)];
+                    word = char.ToUpperInvariant(word[0]) + word.Substring(1);
+                    switch (random.Next(4))
+                    {
+                        case 0: part = word + ": " + random.Next(10, 9999) + ", " + random.Next(10, 99) + "."; break;
+                        case 1: part = random.Next(1, 29).ToString("00") + "." + random.Next(1, 13).ToString("00") + ".2026 - " + word + ";"; break;
+                        case 2: part = "\"" + word + "\" (" + random.Next(1, 100) + ")!"; break;
+                        default: part = word + "? " + random.Next(0, 24).ToString("00") + ":" + random.Next(0, 60).ToString("00") + "."; break;
+                    }
+                }
+                else if (mode == Code)
+                {
+                    string[] names = { "count", "total", "index", "limit", "score", "offset", "width", "height", "value", "size" };
+                    string name = names[random.Next(names.Length)]; int n = random.Next(2, 99);
+                    switch (random.Next(6))
+                    {
+                        case 0: part = "const " + name + " = items.filter(x => x.id >= " + n + ");"; break;
+                        case 1: part = "if (" + name + " !== null) { return " + name + " + " + n + "; }"; break;
+                        case 2: part = "for (int " + name + " = 0; " + name + " < " + n + "; " + name + "++) { sum += " + name + "; }"; break;
+                        case 3: part = "<button class=\"primary\" data-id=\"" + n + "\">Save</button>"; break;
+                        case 4: part = ".panel { padding: " + n + "px; display: grid; gap: 8px; }"; break;
+                        default: part = "const result = { " + name + ": " + n + ", ready: true };"; break;
+                    }
+                }
+                else part = words[random.Next(words.Length)];
+                if (result.Length > 0) result.Append(' ');
+                result.Append(part);
+            }
+            return result.ToString();
+        }
+        public static double Baseline(Profile p, string mode, string language, int seconds)
+        {
+            var values = p.Sessions.Where(s => s.Completed && s.Mode == mode && s.Language == language && s.RequestedSeconds == seconds && s.Seconds >= seconds - 1 && s.Accuracy >= 97)
+                .Reverse().Take(5).Select(s => s.Cpm).OrderBy(x => x).ToArray();
+            if (values.Length == 0) return 0;
+            int middle = values.Length / 2;
+            return values.Length % 2 == 0 ? (values[middle - 1] + values[middle]) / 2 : values[middle];
+        }
+    }
     public class Run
     {
         public string Text;
@@ -214,6 +309,13 @@ namespace SpeedKlava
         public string Mode;
         public int Stage;
         public double LastTime = -1;
+        public int RequestedSeconds;
+        public int TargetCpm;
+        public int RhythmSamples;
+        double intervalSum, intervalSquares;
+        bool previousCorrect;
+        public double RhythmCv { get { if (RhythmSamples < 2 || intervalSum <= 0) return 0; double mean = intervalSum / RhythmSamples; return Math.Sqrt(Math.Max(0, intervalSquares / RhythmSamples - mean * mean)) / mean * 100; } }
+        public void BreakRhythm() { previousCorrect = false; LastTime = -1; }
         public Dictionary<string, KeyStat> Delta = new Dictionary<string, KeyStat>();
         public Run(string text, Profile p, string mode) { Text = text; Language = p.Language; Mode = mode; Stage = p.Stage; }
         public double Accuracy { get { return Attempts == 0 ? 100 : 100.0 * Correct / Attempts; } }
@@ -222,6 +324,9 @@ namespace SpeedKlava
         {
             if (Finished || Position >= Text.Length) return false;
             bool good = Text[Position] == c;
+            double interval = (ActiveSeconds - LastTime) * 1000;
+            if (good && previousCorrect && LastTime >= 0 && interval >= 20 && interval <= 3000) { RhythmSamples++; intervalSum += interval; intervalSquares += interval * interval; }
+            previousCorrect = good;
             Attempts++; if (good) Correct++; else Errors++;
             string key = char.ToLowerInvariant(Text[Position]).ToString();
             Record(key, good);
@@ -240,7 +345,7 @@ namespace SpeedKlava
         }
         public Session Commit(Profile p, bool completed)
         {
-            var s = new Session { Language = Language, Mode = Mode, Seconds = Math.Round(ActiveSeconds, 2), Correct = Correct, Attempts = Attempts, Errors = Errors, Stage = Stage, Completed = completed };
+            var s = new Session { Language = Language, Mode = Mode, Seconds = Math.Round(ActiveSeconds, 2), Correct = Correct, Attempts = Attempts, Errors = Errors, Stage = Stage, Completed = completed, RequestedSeconds = RequestedSeconds, TargetCpm = TargetCpm, RhythmSamples = RhythmSamples, RhythmCv = RhythmCv };
             s.Xp = completed ? Math.Min(200, (int)(Correct / 4.0 * (Accuracy / 100)) + (Accuracy >= 97 ? 20 : 0)) : 0;
             p.Sessions.Add(s);
             foreach (KeyStat d in Delta.Values)
