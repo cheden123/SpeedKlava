@@ -38,7 +38,7 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Build and test
-        shell: pwsh
+        shell: powershell
         run: |
           .\build.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Build or engine tests failed' }
