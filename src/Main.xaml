@@ -36,18 +36,18 @@
      <TextBlock Text="ПРАКТИКА" Style="{StaticResource Label}" Margin="14,0,0,10"/>
      <Button x:Name="NavTrain" Content="⌨    Тренировка" Style="{StaticResource Nav}"/>
      <Button x:Name="NavExpert" Content="⚡    Для опытных" Style="{StaticResource Nav}"/>
-     <Button x:Name="NavLessons" Content="▦    Карта навыка" Style="{StaticResource Nav}"/>
+     <Button x:Name="NavLessons" Content="▦    Уроки и план" Style="{StaticResource Nav}"/>
      <Button x:Name="NavProgress" Content="↗    Мой прогресс" Style="{StaticResource Nav}"/>
      <TextBlock Text="ПОЛЕЗНОЕ" Style="{StaticResource Label}" Margin="14,18,0,10"/>
      <Button x:Name="NavScience" Content="◇    Как это работает" Style="{StaticResource Nav}"/>
      <Button x:Name="NavSettings" Content="⚙    Настройки" Style="{StaticResource Nav}"/>
     </StackPanel>
     <StackPanel DockPanel.Dock="Bottom" VerticalAlignment="Bottom">
-     <Border Background="#222030" CornerRadius="12" Padding="15" Margin="0,0,0,20"><StackPanel><TextBlock Text="Маленький шаг сегодня" Foreground="#D5C9FF" FontWeight="SemiBold"/><TextBlock Text="Вернись завтра. Навык растёт между занятиями." Foreground="#A39CB9" FontSize="12" Margin="0,7,0,0"/></StackPanel></Border>
+     <Border Background="#222030" CornerRadius="12" Padding="15" Margin="0,0,0,20"><StackPanel><TextBlock Text="Маленький шаг сегодня" Foreground="#D5C9FF" FontWeight="SemiBold"/><TextBlock x:Name="SidebarNudge" MaxHeight="54" TextTrimming="CharacterEllipsis" Text="Вернись завтра. Навык растёт между занятиями." Foreground="#A39CB9" FontSize="12" Margin="0,7,0,0"/></StackPanel></Border>
      <TextBlock x:Name="LevelLabel" Text="Уровень 1 · Исследователь" FontWeight="SemiBold" FontSize="12"/>
      <ProgressBar x:Name="LevelBar" Margin="0,10,0,8" Maximum="500"/>
      <TextBlock x:Name="XpLabel" Text="0 / 500 XP" Style="{StaticResource Label}"/>
-     <TextBlock Text="OFFLINE  /  WINDOWS  /  v1.1" FontSize="9" Foreground="#63677D" Margin="0,22,0,0"/>
+     <TextBlock Text="OFFLINE  /  WINDOWS  /  v1.2" FontSize="9" Foreground="#63677D" Margin="0,22,0,0"/>
     </StackPanel>
     <Grid/>
    </DockPanel>
@@ -69,15 +69,17 @@
      <Border Style="{StaticResource Card}" Padding="25">
       <StackPanel>
        <DockPanel><ComboBox x:Name="ModeBox" DockPanel.Dock="Left" Width="220" SelectedIndex="0"><ComboBoxItem Content="Курс"/><ComboBoxItem Content="Слабые клавиши"/><ComboBoxItem Content="Сочетания"/><ComboBoxItem Content="Тексты"/><ComboBoxItem Content="Тест"/></ComboBox><ComboBox x:Name="DurationBox" DockPanel.Dock="Left" Margin="10,0,0,0" Width="108" SelectedIndex="1"><ComboBoxItem Content="30 секунд"/><ComboBoxItem Content="60 секунд"/><ComboBoxItem Content="120 секунд"/><ComboBoxItem Content="300 секунд"/></ComboBox><TextBlock x:Name="RunStats" Text="ГОТОВ К ПРАКТИКЕ" Foreground="#A89CC6" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel>
-       <ProgressBar x:Name="RunBar" Maximum="100" Margin="0,20,0,18" Height="3"/>
+       <Expander Foreground="#CFBFF4" Margin="0,15,0,0"><Expander.Header><TextBlock x:Name="LessonPreviewTitle" Text="Перед практикой · мини-урок" FontSize="13"/></Expander.Header><StackPanel Margin="4,12,0,0"><TextBlock x:Name="LessonPreviewBody" Foreground="#B8B6CA" FontSize="13" LineHeight="23"/><Button x:Name="AllLessonsButton" Content="Открыть уроки и план" HorizontalAlignment="Left" Margin="0,12,0,0"/></StackPanel></Expander>
+       <ProgressBar x:Name="RunBar" Maximum="100" Margin="0,18,0,18" Height="3"/>
        <Border x:Name="TypingSurface" Background="#14151D" CornerRadius="12" Padding="20" MinHeight="155" Focusable="True" Cursor="IBeam" AutomationProperties.Name="Текст для печати. Нажмите Начать, затем печатайте показанный текст.">
         <TextBlock x:Name="TypingText" FontFamily="Consolas" FontSize="25" LineHeight="39" TextWrapping="Wrap"/>
        </Border>
        <DockPanel Margin="0,18,0,0"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="PauseButton" Content="Пауза" Margin="0,0,8,0" IsEnabled="False"/><Button x:Name="StartButton" Content="Начать практику  →" Style="{StaticResource Primary}"/></StackPanel><StackPanel VerticalAlignment="Center"><TextBlock x:Name="Coach" Text="Не смотри на клавиатуру. Начни с удобного темпа." Foreground="#C4BED5" FontSize="12"/><TextBlock x:Name="FingerHint" Text="А → левый указательный" Foreground="#8D83A4" FontSize="11" Margin="0,4,12,0"/></StackPanel></DockPanel>
-       <Border x:Name="ResultPanel" Visibility="Collapsed" Background="#262338" CornerRadius="10" Padding="18" Margin="0,18,0,0"><StackPanel><TextBlock x:Name="ResultTitle" Foreground="#D9CCFF" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="ResultDetail" Foreground="#C1BBD4" Margin="0,9,0,0"/></StackPanel></Border>
+       <Border x:Name="ResultPanel" Visibility="Collapsed" Background="#262338" CornerRadius="10" Padding="18" Margin="0,18,0,0"><StackPanel><TextBlock x:Name="ResultTitle" Foreground="#D9CCFF" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="ResultDetail" Foreground="#C1BBD4" Margin="0,9,0,0"/><TextBlock Text="РАЗБОР ТРЕНЕРА" FontSize="10" Foreground="#AC98D9" Margin="0,17,0,7"/><TextBlock x:Name="ResultCoach" Foreground="#DFDAEC" LineHeight="23"/><TextBlock x:Name="RewardSummary" Foreground="#80D9B5" Margin="0,12,0,0" LineHeight="22"/><WrapPanel Margin="0,15,0,0"><Button x:Name="NextStepButton" Content="Рекомендованный подход  →" Margin="0,0,10,6"/><Button x:Name="ResultLessonsButton" Content="Разобраться в технике" Margin="0,0,0,6"/></WrapPanel></StackPanel></Border>
       </StackPanel>
      </Border>
      <Border x:Name="KeyboardCard" Style="{StaticResource Card}" Margin="0,20,0,0" Padding="20,16"><StackPanel><DockPanel Margin="0,0,0,15"><TextBlock Text="КАРТА ДВИЖЕНИЙ" Style="{StaticResource Label}"/><TextBlock Text="Один цвет — один палец  ·  яркая клавиша — следующая" Style="{StaticResource Label}" HorizontalAlignment="Right"/></DockPanel><StackPanel x:Name="KeyboardPanel" HorizontalAlignment="Center"/><TextBlock x:Name="KeyboardCaption" Text="Исходная позиция: Ф Ы В А  ·  О Л Д Ж. Большие пальцы — над пробелом." Style="{StaticResource Label}" TextAlignment="Center" Margin="0,13,0,0"/></StackPanel></Border>
+     <Border Style="{StaticResource Card}" Margin="0,20,0,0" Padding="20"><StackPanel><TextBlock x:Name="DailyPlanTitle" Text="План на сегодня · 0 / 3" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Один подход может выполнить несколько заданий. Прогресс общий для RU и EN." Style="{StaticResource Label}" Margin="0,8,0,10"/><StackPanel x:Name="TrainingPlan"/></StackPanel></Border>
      <TextBlock Text="Без гонки и штрафов за пропущенный день. Занимайся в своём темпе." Foreground="#777D92" FontSize="12" Margin="2,16,0,0"/>
     </StackPanel>
     <StackPanel x:Name="OtherPage" Visibility="Collapsed"/>

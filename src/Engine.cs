@@ -30,6 +30,7 @@ namespace SpeedKlava
         public int Errors;
         public int Stage;
         public int Xp;
+        public int BonusXp;
         public bool Completed;
         public int RequestedSeconds;
         public int TargetCpm;
@@ -52,8 +53,9 @@ namespace SpeedKlava
         public int ExpertGoal = 300;
         public List<KeyStat> Keys = new List<KeyStat>();
         public List<Session> Sessions = new List<Session>();
+        public List<Reward> Rewards = new List<Reward>();
         public int Stage { get { return Language == "RU" ? RuStage : EnStage; } set { if (Language == "RU") RuStage = value; else EnStage = value; } }
-        public int Xp { get { return Sessions.Sum(s => s.Xp); } }
+        public int Xp { get { return Sessions.Sum(s => s.Xp) + Rewards.Sum(r => r.Xp); } }
         public KeyStat Stat(string key, string language)
         {
             KeyStat stat = Keys.FirstOrDefault(k => k.Key == key && k.Language == language);
@@ -95,7 +97,8 @@ namespace SpeedKlava
             using (var reader = System.Xml.XmlReader.Create(path, settings))
             {
                 Profile p = (Profile)new XmlSerializer(typeof(Profile)).Deserialize(reader);
-                if (p == null || p.Keys == null || p.Sessions == null || p.Version != 1) throw new InvalidDataException("Неизвестный формат прогресса.");
+                if (p == null || p.Keys == null || p.Sessions == null || p.Rewards == null || p.Version != 1) throw new InvalidDataException("Неизвестный формат прогресса.");
+                if (p.Rewards.Any(r => r == null || string.IsNullOrEmpty(r.Id) || r.Xp < 0) || p.Rewards.Select(r => r.Id).Distinct().Count() != p.Rewards.Count) throw new InvalidDataException("Повреждённые награды прогресса.");
                 p.Language = p.Language == "EN" ? "EN" : "RU";
                 p.RuStage = Math.Max(0, Math.Min(Curriculum.Count - 1, p.RuStage));
                 p.EnStage = Math.Max(0, Math.Min(Curriculum.Count - 1, p.EnStage));

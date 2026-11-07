@@ -16,8 +16,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("SpeedKlava")]
 [assembly: AssemblyProduct("SpeedKlava")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace SpeedKlava
 {
@@ -33,6 +33,7 @@ namespace SpeedKlava
         double previousTick, lastInputElapsed;
         int limit = 60;
         string page = "Тренировка";
+        string nextMode = "Курс";
         string smokeDirectory;
         Dictionary<char, Border> keys = new Dictionary<char, Border>();
         [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
@@ -85,6 +86,9 @@ namespace SpeedKlava
             Get<ComboBox>("ExpertGoalBox").SelectionChanged += delegate { if (!initializing) { EndPartial(); profile.ExpertGoal = int.Parse(((ComboBoxItem)Get<ComboBox>("ExpertGoalBox").SelectedItem).Content.ToString()); Save(); Prepare(); } };
             Get<Button>("StartButton").Click += delegate { if (running) { EndPartial(); Prepare(); } Start(); };
             Get<Button>("PauseButton").Click += delegate { TogglePause(); };
+            Get<Button>("AllLessonsButton").Click += delegate { Navigate("Lessons"); };
+            Get<Button>("ResultLessonsButton").Click += delegate { Navigate("Lessons"); };
+            Get<Button>("NextStepButton").Click += delegate { QuickPractice(nextMode, 60); };
             window.PreviewTextInput += OnText;
             window.PreviewKeyDown += OnKey;
             Get<Border>("TypingSurface").MouseDown += delegate { if (running && !paused) Get<Border>("TypingSurface").Focus(); };
@@ -132,6 +136,10 @@ namespace SpeedKlava
             Text("XpLabel").Text = profile.Xp % 500 + " / 500 XP"; Get<ProgressBar>("LevelBar").Value = profile.Xp % 500;
             Text("LessonTitle").Text = expert ? "Следующий рубеж: " + profile.ExpertGoal + " зн/мин" : (profile.Stage + 1).ToString("00") + " / " + Curriculum.Names[profile.Stage];
             Text("LessonHint").Text = expert ? "Личный темп без гонки за ошибками. Сохраняй точность от 97%." : profile.Language == "RU" ? "Найди выступы на А и О. Держи пальцы близко к ФЫВА и ОЛДЖ." : "Найди выступы на F и J. Держи пальцы близко к ASDF и JKL;.";
+            Text("SidebarNudge").Text = Coach.Encouragement(profile);
+            var missions = Coach.Missions(profile, DateTime.Today, expert);
+            Text("DailyPlanTitle").Text = "План на сегодня · " + missions.Count(m => m.Done) + " / 3";
+            FillPlan(Get<StackPanel>("TrainingPlan"));
         }
         void Prepare()
         {
@@ -145,6 +153,8 @@ namespace SpeedKlava
             Get<Border>("KeyboardCard").Visibility = expert ? Visibility.Collapsed : Visibility.Visible;
             Text("ExpertDescription").Text = expert ? Expert.Description(Mode) : "";
             Text("ExpertFeedback").Text = "Цель " + profile.ExpertGoal + " зн/мин · таймер начнётся с первой буквы.";
+            Text("LessonPreviewTitle").Text = "Перед практикой · " + Coach.LessonTitle(profile, Mode);
+            Text("LessonPreviewBody").Text = Coach.Tip(profile, Mode);
             Get<Border>("ResultPanel").Visibility = Visibility.Collapsed;
             Get<Button>("StartButton").Content = "Начать практику  →";
             Get<Button>("PauseButton").IsEnabled = false;
@@ -227,11 +237,13 @@ namespace SpeedKlava
             SyncTime(); clock.Stop(); running = false; paused = false; committed = true;
             int oldStage = profile.Stage;
             double baseline = expert ? Expert.Baseline(profile, Mode, profile.Language, limit) : 0;
-            Session s = run.Commit(profile, completed); Save(); Refresh();
+            Session s = run.Commit(profile, completed);
+            var rewards = Coach.Award(profile, s); Save(); Refresh();
+            int earned = s.Xp + s.BonusXp;
             Get<Button>("PauseButton").IsEnabled = false; Get<Button>("PauseButton").Content = "Пауза";
             Get<Button>("StartButton").Content = "Следующее занятие  →";
             Get<Border>("ResultPanel").Visibility = Visibility.Visible;
-            Text("ResultTitle").Text = completed ? (profile.Stage > oldStage ? "Новый этап открыт!  +" : "Ещё один шаг вперёд.  +") + s.Xp + " XP" : "Практика сохранена";
+            Text("ResultTitle").Text = completed ? (profile.Stage > oldStage ? "Новый этап открыт!  +" : "Ещё один шаг вперёд.  +") + earned + " XP" : "Практика сохранена";
             string advice = s.Accuracy >= 97 ? "Точность отличная. Сохраняй этот ритм." : "В следующем занятии немного снизь темп. Сначала точность, затем скорость.";
             if (Mode == "Курс" && profile.Stage == oldStage && s.Accuracy >= 97) advice += " Для открытия этапа: два занятия подряд, ≥97% и ≥80 верных знаков в каждом.";
             if (expert)
@@ -240,10 +252,13 @@ namespace SpeedKlava
                 advice = !full ? "Для сравнения результатов заверши полную выбранную длительность." : s.Accuracy < 97 ? "Скорость пока не идёт в рекорд: верни точность к 97%, затем повышай темп." : s.Cpm >= s.TargetCpm ? "Личный рубеж пройден с точностью ≥97%! Закрепи результат перед повышением цели." : "До цели " + Math.Ceiling(s.TargetCpm - s.Cpm) + " зн/мин. Сохраняй точность и прибавляй постепенно.";
                 if (full && s.Accuracy >= 97) advice += baseline > 0 ? " К медиане последних пяти подходящих занятий: " + (s.Cpm - baseline).ToString("+0;-0;0") + " зн/мин." : " Это первый зачётный результат для этого режима и длительности.";
                 if (s.RhythmSamples >= 10) advice += " Разброс интервалов: " + s.RhythmCv.ToString("0") + "%; меньше — ровнее. Сравнивай в одном режиме.";
-                if (full && s.Accuracy >= 97 && s.Cpm >= s.TargetCpm) Text("ResultTitle").Text = "Личный рубеж пройден!  +" + s.Xp + " XP";
+                if (full && s.Accuracy >= 97 && s.Cpm >= s.TargetCpm) Text("ResultTitle").Text = "Личный рубеж пройден!  +" + earned + " XP";
             }
             if (profile.TodaySeconds >= profile.GoalMinutes * 60) advice += " Дневная цель выполнена. Можно отдохнуть!";
             Text("ResultDetail").Text = Math.Round(s.Cpm) + " зн/мин  ·  " + s.Wpm.ToString("0.0") + " WPM  ·  " + s.Accuracy.ToString("0.0") + "% точности  ·  " + s.Errors + " ошибок\n" + advice;
+            Text("ResultCoach").Text = Coach.Feedback(profile, s, run);
+            Text("RewardSummary").Text = rewards.Count > 0 ? "Открыто:\n" + string.Join("\n", rewards.Select(r => "✓ " + r.Title + "  +" + r.Xp + " XP").ToArray()) : Coach.Encouragement(profile);
+            nextMode = expert ? (s.Accuracy < 97 ? Expert.Weak : s.RhythmSamples >= 10 && s.RhythmCv > 60 ? Expert.Rhythm : Mode) : s.Accuracy < 97 ? "Слабые клавиши" : "Курс";
             Text("Coach").Text = "Сделай короткую паузу. Посмотри вдаль и расслабь руки.";
             UpdateRunStats();
         }
@@ -313,7 +328,7 @@ namespace SpeedKlava
                 modes.SelectedIndex = 0; initializing = false; Prepare();
             }
             page = new Dictionary<string, string> { { "Train", "Тренировка" }, { "Expert", "Для опытных" }, { "Lessons", "Карта навыка" }, { "Progress", "Мой прогресс" }, { "Science", "Как это работает" }, { "Settings", "Настройки" } }[nav];
-            HighlightNav(nav); Text("PageTitle").Text = nav == "Train" ? "Найди свой ритм." : page;
+            HighlightNav(nav); Text("PageTitle").Text = nav == "Train" ? "Найди свой ритм." : nav == "Lessons" ? "Уроки и план" : page;
             Text("PageSubtitle").Text = nav == "Train" ? "Точность сегодня. Скорость — следом." : new Dictionary<string, string> { { "Expert", "Ты уже знаешь клавиши. Теперь — скорость, ритм и сложные переходы." }, { "Lessons", "От первых движений до свободной печати." }, { "Progress", "Твой единственный соперник — ты вчерашний." }, { "Science", "Что говорят исследования и как устроены занятия." }, { "Settings", "Сделай практику удобной для себя." } }[nav];
             Get<StackPanel>("TrainPage").Visibility = TrainingPage ? Visibility.Visible : Visibility.Collapsed;
             Get<StackPanel>("OtherPage").Visibility = TrainingPage ? Visibility.Collapsed : Visibility.Visible;
@@ -340,13 +355,43 @@ namespace SpeedKlava
             if (page == "Как это работает") Science();
             if (page == "Настройки") Settings();
         }
+        void QuickPractice(string mode, int seconds)
+        {
+            Navigate(Expert.IsMode(mode) ? "Expert" : "Train"); EndPartial();
+            if (mode == Expert.Code && profile.Language != "EN") Get<ComboBox>("LanguageBox").SelectedIndex = 1;
+            initializing = true;
+            Get<ComboBox>("ModeBox").SelectedItem = Get<ComboBox>("ModeBox").Items.Cast<ComboBoxItem>().First(i => i.Content.ToString() == mode);
+            Get<ComboBox>("DurationBox").SelectedIndex = Array.IndexOf(new[] { 30, 60, 120, 300 }, seconds);
+            initializing = false; Prepare(); Start();
+        }
+        void FillPlan(StackPanel parent)
+        {
+            parent.Children.Clear();
+            foreach (Mission mission in Coach.Missions(profile, DateTime.Today, expert))
+            {
+                Mission m = mission;
+                var row = new DockPanel { Margin = new Thickness(0, 10, 0, 5) };
+                var button = new Button { Content = m.Done ? "Ещё подход" : "Практика  →", Margin = new Thickness(15, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
+                button.Click += delegate { QuickPractice(m.Mode, 60); }; DockPanel.SetDock(button, Dock.Right); row.Children.Add(button);
+                var words = new StackPanel();
+                words.Children.Add(new TextBlock { Text = (m.Done ? "✓  " : "○  ") + m.Title + "   " + m.Value + "/" + m.Goal + "   +" + m.Xp + " XP", Foreground = Brush(m.Done ? "#80D9B5" : "#DDD5F0"), FontWeight = FontWeights.SemiBold });
+                words.Children.Add(new TextBlock { Text = m.Detail, Foreground = Brush("#999DB1"), FontSize = 12, Margin = new Thickness(0, 6, 0, 0) });
+                row.Children.Add(words); parent.Children.Add(row);
+            }
+        }
         void Lessons()
         {
+            var plan = Card("Три небольших задачи на сегодня", "Не обязательно делать всё сразу. Один подход может закрыть несколько задач. Прогресс общий для обеих раскладок; бонус каждого задания выдаётся один раз в день. Пропуски не отнимают XP.");
+            var planContents = new StackPanel(); plan.Children.Add(planContents); FillPlan(planContents);
+            var intro = Card("Как устроить занятие", "1. Открой мини-урок и выбери одну вещь, за которой будешь следить.\n2. Потренируйся 30–60 секунд в удобном темпе.\n3. Прочитай разбор: какие буквы мешали и что попробовать дальше.\n4. После двух-трёх подходов сделай паузу. На следующем занятии возвращайся к трудному месту, а не начинай всё заново.");
+            var practice = new Button { Content = "Начать короткую практику  →", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0) };
+            practice.Click += delegate { QuickPractice(expert ? Expert.Speed : "Курс", 30); }; intro.Children.Add(practice);
             Card("Точность открывает следующий шаг", "Два занятия курса подряд с точностью от 97% и минимум 80 верными знаками в каждом открывают следующий этап. Это правило SpeedKlava, а не научно установленная граница. Скорость не ограничивает переход.");
             for (int i = 0; i < Curriculum.Count; i++)
             {
                 int stage = i;
                 var p = Card((i + 1).ToString("00") + "  /  " + Curriculum.Names[i] + (i < profile.Stage ? "   ✓" : i == profile.Stage ? "   ← сейчас" : ""), "Клавиши: " + (profile.Language == "RU" ? Curriculum.Ru : Curriculum.En)[i]);
+                p.Children.Add(new TextBlock { Text = Coach.Lesson(profile, i), Foreground = Brush("#C5BFD6"), LineHeight = 23, Margin = new Thickness(0, 12, 0, 0) });
                 var b = new Button { Content = i > profile.Stage ? "Откроется после предыдущего этапа" : i == profile.Stage ? "Продолжить" : "Повторить без изменения этапа", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0), IsEnabled = i <= profile.Stage };
                 b.Click += delegate {
                     Navigate("Train"); EndPartial(); Get<ComboBox>("ModeBox").SelectedIndex = 0;
@@ -355,6 +400,8 @@ namespace SpeedKlava
                     {
                         var copy = new Profile { Language = profile.Language, RuStage = stage, EnStage = stage, Keys = profile.Keys };
                         run = new Run(Curriculum.Generate(copy, "Повторение", random, 210), copy, "Повторение");
+                        Text("LessonPreviewTitle").Text = "Повторение · " + Curriculum.Names[stage];
+                        Text("LessonPreviewBody").Text = Coach.Lesson(copy, stage);
                         RenderText();
                     }
                     Start();
@@ -364,6 +411,13 @@ namespace SpeedKlava
             var advanced = Card("Уже умеешь печатать?", "В разделе «Для опытных» сразу доступна полная раскладка: скорость, ритм, сложные слова, персональные пары, знаки и код. Начальный курс проходить не нужно.");
             var go = new Button { Content = "Перейти к тренировкам для опытных  →", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0) };
             go.Click += delegate { Navigate("Expert"); }; advanced.Children.Add(go);
+            foreach (string mode in Expert.Modes)
+            {
+                string m = mode;
+                var lesson = Card(m.Replace("Профи · ", "Мастерская · "), Coach.Tip(profile, m));
+                var start = new Button { Content = "Попробовать 60 секунд  →", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 12, 0, 0) };
+                start.Click += delegate { QuickPractice(m, 60); }; lesson.Children.Add(start);
+            }
         }
         void Progress()
         {
@@ -387,15 +441,16 @@ namespace SpeedKlava
             week.Children.Add(grid);
             var weak = profile.Keys.Where(k => k.Language == profile.Language && k.Key != " " && k.Key.Length == 1 && k.Attempts >= 3).OrderBy(k => k.Accuracy).ThenByDescending(k => k.Latency).Take(8).ToList();
             Card("Точки роста", weak.Count == 0 ? "После нескольких занятий здесь появятся буквы с ошибками и задержками." : string.Join("\n", weak.Select(k => k.Key.ToUpperInvariant() + "   ·   " + k.Accuracy.ToString("0") + "%   ·   " + k.Attempts + " нажатий   ·   " + (k.TimingSamples == 0 ? "мало данных по времени" : k.Latency.ToString("0") + " мс между нажатиями") + "   ·   повтор " + (k.Due <= DateTime.Now ? "сегодня" : k.Due.ToString("dd.MM"))).ToArray()));
-            var badges = new List<string>();
-            if (complete.Count > 0) badges.Add("✓ Первый шаг — завершено первое занятие");
-            if (complete.Any(s => s.Accuracy >= 97 && s.Correct >= 80)) badges.Add("✓ Чистый ритм — ≥97% на 80+ знаках");
-            if (profile.Streak >= 3) badges.Add("✓ Возвращение — три дня подряд");
-            if (profile.TodaySeconds >= profile.GoalMinutes * 60) badges.Add("✓ Сегодня получилось — дневная цель выполнена");
-            if (expertRuns.Any(s => s.TargetCpm > 0 && s.Cpm >= s.TargetCpm)) badges.Add("✓ Личный рубеж — цель скорости при точности ≥97%");
-            Card("Твои достижения", badges.Count == 0 ? "Заверши первое занятие, чтобы открыть «Первый шаг»." : string.Join("\n", badges.ToArray()));
+            var badgePanel = Card("Коллекция достижений", "Накопленный опыт не исчезает после пропусков. Выполненные ранее условия будут признаны при следующем завершённом занятии от 20 секунд и 20 знаков. Награда за каждое достижение выдаётся один раз.");
+            foreach (Achievement a in Coach.Achievements(profile))
+            {
+                bool claimed = profile.Rewards.Any(r => r.Id == "badge:" + a.Id);
+                badgePanel.Children.Add(new TextBlock { Text = (claimed ? "✓  " : a.Done ? "◇  " : "○  ") + a.Title + "   +" + a.Xp + " XP", Foreground = Brush(claimed ? "#80D9B5" : "#C8BDDE"), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 15, 0, 5) });
+                badgePanel.Children.Add(new TextBlock { Text = a.Detail + " · " + Math.Min(a.Goal, a.Value).ToString("0.#") + "/" + a.Goal.ToString("0.#") + (a.Done && !claimed ? " · бонус после следующего занятия" : ""), Foreground = Brush("#989DAF"), FontSize = 12 });
+                badgePanel.Children.Add(new ProgressBar { Maximum = a.Goal, Value = Math.Min(a.Goal, a.Value), Margin = new Thickness(0, 8, 0, 0) });
+            }
             var hist = Card("История · последние 20 занятий", "Зн/мин = верные нажатия / активные минуты. WPM = зн/мин / 5. Точность учитывает все ошибки, даже исправленные. Курс и тест сравнивай отдельно.");
-            foreach (Session s in sessions.AsEnumerable().Reverse().Take(20)) hist.Children.Add(new TextBlock { Text = s.At.ToString("dd.MM HH:mm") + "   ·   " + s.Mode + "   ·   " + Math.Round(s.Cpm) + " зн/мин   ·   " + s.Accuracy.ToString("0.0") + "%   ·   " + s.Seconds.ToString("0") + " с   ·   " + (s.Completed ? "+" + s.Xp + " XP" : "прервано") + (Expert.IsMode(s.Mode) && s.RhythmSamples >= 10 ? "   ·   разброс " + s.RhythmCv.ToString("0") + "%" : ""), Margin = new Thickness(0, 12, 0, 0), Foreground = Brush("#B9BDD0") });
+            foreach (Session s in sessions.AsEnumerable().Reverse().Take(20)) hist.Children.Add(new TextBlock { Text = s.At.ToString("dd.MM HH:mm") + "   ·   " + s.Mode + "   ·   " + Math.Round(s.Cpm) + " зн/мин   ·   " + s.Accuracy.ToString("0.0") + "%   ·   " + s.Seconds.ToString("0") + " с   ·   " + (s.Completed ? "+" + (s.Xp + s.BonusXp) + " XP" : "прервано") + (Expert.IsMode(s.Mode) && s.RhythmSamples >= 10 ? "   ·   разброс " + s.RhythmCv.ToString("0") + "%" : ""), Margin = new Thickness(0, 12, 0, 0), Foreground = Brush("#B9BDD0") });
         }
         void Science()
         {
@@ -440,7 +495,7 @@ namespace SpeedKlava
                 } catch (Exception e) { Notice("Импорт не выполнен: " + e.Message); }
             };
             actions.Children.Add(export); actions.Children.Add(import); p.Children.Add(actions);
-            Card("О приложении", "SpeedKlava 1.1 · нативное приложение Windows на WPF / .NET Framework 4.8. Без рекламы, аналитики, глобального перехвата клавиш и сетевых запросов. Ввод обрабатывается только в активном упражнении. В текстах нет заимствованного исследовательского датасета.");
+            Card("О приложении", "SpeedKlava 1.2 · нативное приложение Windows на WPF / .NET Framework 4.8. Без рекламы, аналитики, глобального перехвата клавиш и сетевых запросов. Ввод обрабатывается только в активном упражнении. В текстах нет заимствованного исследовательского датасета.");
         }
         void Check(StackPanel parent, string label, bool value, Action<bool> change)
         {
@@ -483,6 +538,16 @@ namespace SpeedKlava
                 Ensure(Mode == Expert.Speed && profile.Stage == 0, "switching RU leaves EN-only code without affecting course");
                 Navigate("Train");
                 Ensure(!expert && Mode == "Курс" && Get<Border>("ExpertPanel").Visibility == Visibility.Collapsed, "return to beginner course");
+                Ensure(Get<StackPanel>("TrainingPlan").Children.Count == 3 && Text("LessonPreviewBody").Text.Length > 80, "daily plan and lesson preview");
+                QuickPractice("Курс", 30);
+                run = new Run(new string('а', 100), profile, "Курс") { RequestedSeconds = 30 };
+                foreach (char c in run.Text) { run.ActiveSeconds += .3; run.Input(c); }
+                Finish(true);
+                Ensure(profile.Rewards.Count > 0 && Text("RewardSummary").Text.Contains("XP") && Text("ResultCoach").Text.Length > 20, "coach feedback and rewards");
+                Get<Button>("NextStepButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Ensure(running && run.Mode == "Курс", "recommended next exercise"); EndPartial();
+                Get<Button>("AllLessonsButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Ensure(!TrainingPage && Get<StackPanel>("OtherPage").Children.Count >= 12, "learning hub"); Navigate("Train");
                 Get<ComboBox>("DurationBox").SelectedIndex = 1;
                 Get<ComboBox>("LanguageBox").SelectedIndex = 0;
                 Get<ComboBox>("ModeBox").SelectedIndex = 0;
@@ -493,7 +558,7 @@ namespace SpeedKlava
                     try
                     {
                         string current = pages[index++];
-                        if (current == "Done") { timerShot.Stop(); File.WriteAllText(Path.Combine(smokeDirectory, "smoke-result.txt"), "PASS: beginner regression; all six expert modes; EN code; target; five-minute duration; full layout at stage zero; pause/resume; mode/language transitions; all six pages; minimum-size layouts; eight screenshots."); window.Close(); return; }
+                        if (current == "Done") { timerShot.Stop(); File.WriteAllText(Path.Combine(smokeDirectory, "smoke-result.txt"), "PASS: beginner/expert regression; daily plan; mini-lessons; learning hub; coach feedback; reward display; next exercise navigation; mode/language transitions; six pages; minimum-size layouts; eight screenshots."); window.Close(); return; }
                         if (current == "Small") { Navigate("Train"); window.Width = 1000; window.Height = 720; }
                         else if (current == "ExpertSmall") Navigate("Expert");
                         else Navigate(current);

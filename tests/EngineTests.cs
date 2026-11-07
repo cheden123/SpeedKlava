@@ -126,6 +126,60 @@ class EngineTests
                 Assert(loaded.RuStage == 3 && loaded.ExpertGoal == 300 && loaded.Sessions.Count == 0, "v1 progress loads with expert defaults");
             }
             finally { if (File.Exists(temp)) File.Delete(temp); }
+            var rewardProfile = new Profile(); DateTime day = new DateTime(2026, 11, 7, 12, 0, 0);
+            var first = new Session { At = day, Mode = "Курс", RequestedSeconds = 60, Seconds = 30, Correct = 100, Attempts = 100, Completed = true, Xp = 45 };
+            rewardProfile.Sessions.Add(first);
+            var awards = Coach.Award(rewardProfile, first);
+            Assert(awards.Count == 3 && first.BonusXp == 95 && rewardProfile.Xp == 140, "first accurate run earns daily accuracy and two achievements");
+            Assert(Coach.Award(rewardProfile, first).Count == 0 && rewardProfile.Xp == 140 && first.BonusXp == 95, "reward claims are idempotent without double-counting XP");
+            var focus = new Session { At = day.AddHours(1), Language = "EN", Mode = Expert.Weak, Seconds = 30, Correct = 100, Attempts = 100, Completed = true, Xp = 45 };
+            rewardProfile.Sessions.Add(focus); Coach.Award(rewardProfile, focus);
+            Assert(Coach.Missions(rewardProfile, day, true).All(m => m.Done) && focus.BonusXp == 55 && rewardProfile.Xp == 240, "daily missions combine both languages and award remaining bonuses once");
+            Assert(Coach.Award(rewardProfile, focus).Count == 0, "repeat focus does not re-award daily missions");
+            var tomorrow = new Session { At = day.AddDays(1), Mode = Expert.Hard, Seconds = 30, Correct = 100, Attempts = 100, Completed = true };
+            rewardProfile.Sessions.Add(tomorrow); Coach.Award(rewardProfile, tomorrow);
+            Assert(tomorrow.BonusXp == 50 && Coach.Missions(rewardProfile, tomorrow.At, false).First(m => m.Id == "practice").Value == 1, "missions reset by local date while lifetime rewards remain claimed");
+            var returnDay = new Session { At = day.AddDays(4), Mode = "Курс", Seconds = 30, Correct = 100, Attempts = 100, Completed = true };
+            rewardProfile.Sessions.Add(returnDay); Coach.Award(rewardProfile, returnDay);
+            Assert(rewardProfile.Rewards.Count(reward => reward.Id == "badge:three-days") == 1, "three distinct practice days unlock reward even with gaps");
+            var tiny = new Profile();
+            var tooShort = new Session { At = day, Mode = "Курс", Seconds = 19, Correct = 100, Attempts = 100, Completed = true };
+            tiny.Sessions.Add(tooShort);
+            Assert(Coach.Award(tiny, tooShort).Count == 0 && Coach.Missions(tiny, day, false).All(m => !m.Done), "short attempts cannot farm mission or milestone rewards");
+            var cancelled = new Session { At = day, Mode = Expert.Weak, Seconds = 60, Correct = 100, Attempts = 100, Completed = false };
+            tiny.Sessions.Add(cancelled);
+            Assert(Coach.Award(tiny, cancelled).Count == 0 && Coach.Achievements(tiny).All(a => !a.Done), "partial runs do not count toward achievements");
+            var thousand = new Session { At = day, Mode = "Курс", Seconds = 200, Correct = 1000, Attempts = 1000, Completed = true };
+            tiny.Sessions.Add(thousand); Coach.Award(tiny, thousand);
+            Assert(Coach.Achievements(tiny).First(a => a.Id == "thousand").Done && !Coach.Achievements(tiny).First(a => a.Id == "five-thousand").Done, "milestone thresholds reflect qualified completed characters");
+            Assert(Coach.Missions(new Profile(), day, true).All(m => Expert.IsMode(m.Mode)) && Coach.Missions(new Profile(), day, false).All(m => !Expert.IsMode(m.Mode)), "mission actions match beginner or expert area");
+            temp = Path.Combine(Path.GetTempPath(), "SpeedKlava-reward-" + Guid.NewGuid() + ".xml");
+            try
+            {
+                Store.Write(rewardProfile, temp); var loaded = Store.Read(temp);
+                Assert(loaded.Xp == rewardProfile.Xp && loaded.Rewards.Count == rewardProfile.Rewards.Count && loaded.Sessions[0].BonusXp == first.BonusXp, "rewards and display bonuses survive save/load without duplication");
+                Assert(Coach.Award(loaded, loaded.Sessions[0]).Count == 0, "reward deduplication survives reload");
+                loaded.Rewards.Add(loaded.Rewards[0]); Store.Write(loaded, temp);
+                bool duplicateRejected = false; try { Store.Read(temp); } catch { duplicateRejected = true; }
+                Assert(duplicateRejected, "duplicate imported rewards are rejected");
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
+            var feedbackProfile = new Profile();
+            feedbackProfile.Sessions.Add(new Session { Mode = "Курс", RequestedSeconds = 60, Seconds = 60, Correct = 90, Attempts = 100, Completed = true });
+            feedbackProfile.Sessions.Add(new Session { Mode = "Курс", Language = "EN", RequestedSeconds = 60, Seconds = 60, Correct = 1, Attempts = 100, Completed = true });
+            var improved = new Session { Mode = "Курс", RequestedSeconds = 60, Seconds = 60, Correct = 98, Attempts = 100, Completed = true };
+            feedbackProfile.Sessions.Add(improved);
+            string coaching = Coach.Feedback(feedbackProfile, improved, new Run("а", feedbackProfile, "Курс"));
+            Assert(coaching.Contains("Точность выше") && coaching.Contains("8"), "coach quantifies improvement against matching language and duration");
+            improved.RequestedSeconds = 30;
+            Assert(!Coach.Feedback(feedbackProfile, improved, new Run("а", feedbackProfile, "Курс")).Contains("Точность выше"), "coach never invents improvement without comparable data");
+            var errorRun = Type(new Profile(), "аааа", "Курс", true); var errorSession = errorRun.Commit(new Profile(), true);
+            string errorFeedback = Coach.Feedback(new Profile(), errorSession, errorRun);
+            Assert(errorFeedback.Contains("а (1)") && errorFeedback.Contains("Следующий шаг"), "coach identifies actual expected-key errors and next step");
+            Assert(Coach.Feedback(new Profile(), cancelled, errorRun).Contains("сохранено"), "partial-run coaching acknowledges saved work");
+            foreach (string language in new[] { "RU", "EN" }) for (int stage = 0; stage < Curriculum.Count; stage++)
+                Assert(Coach.Lesson(new Profile { Language = language }, stage).Length > 150, "concrete lesson available at each language and stage");
+            foreach (string mode in Expert.Modes) Assert(Coach.Tip(new Profile(), mode).Length > 150, "expert technique coaching available " + mode);
             Console.WriteLine("PASS: " + assertions + " assertions"); return 0;
         }
         catch (Exception e) { Console.Error.WriteLine(e); return 1; }
